@@ -5,52 +5,40 @@ phases:
     runtime-versions:
       docker: 18
     commands:
-<<<<<<< HEAD
       - echo Installing tools...
       - apt-get update && apt-get install -y curl unzip
       - curl -sL https://github.com/zaproxy/zaproxy/releases/download/v2.14.0/ZAP_2.14.0_unix.sh -o zap.sh
       - chmod +x zap.sh && ./zap.sh -q -dir /zap -desktop none || true
       - curl -s https://api.github.com/repos/trufflesecurity/trufflehog/releases/latest | grep "browser_download_url.*linux_amd64$" | cut -d '"' -f 4 | wget -qi - -O trufflehog
       - chmod +x trufflehog
+      - pip install --upgrade pip
+      - pip install flask
+      - npm install -g snyk
+      - echo Tools installed
+
   pre_build:
     commands:
       - echo Logging in to Amazon ECR...
       - $(aws ecr get-login --no-include-email --region $AWS_REGION) || true
-=======
-      - pip install --upgrade pip
-      - pip install flask
-      - npm install -g snyk
-      - pip install trufflehog
-      - echo "Tools installed"
-
-  pre_build:
-    commands:
       - snyk auth $SNYK_TOKEN
       - snyk test --file=app/requirements.txt --sarif-file-output=snyk.sarif || true
       - snyk monitor --file=app/requirements.txt
-      - trufflehog filesystem . --json > trufflehog.json || true
+      - ./trufflehog git . --json > trufflehog.json || true
 
->>>>>>> 0d80b7c65079138789329f6bccef973517669ab8
   build:
     commands:
       - echo Building Docker image...
       - docker build -t vulnerable-app .
-<<<<<<< HEAD
-      - echo Running TruffleHog for secrets scanning...
-      - ./trufflehog git . --json > trufflehog.json || true
-      - echo Running ZAP baseline scan...
-      - /zap/zap.sh -cmd -quickurl http://localhost:8080 -quickout zap_report.html || true
-=======
       - docker run -d -p 8080:8080 --name vuln-demo vulnerable-app
-      - sleep 10  # give the container time to start
+      - sleep 10  # Give the container time to start
 
   post_build:
     commands:
-      - echo "Running OWASP ZAP in Docker..."
+      - echo Running ZAP baseline scan...
       - docker run --network="host" -v $(pwd):/zap/wrk/:rw ghcr.io/zaproxy/zap-stable zap-baseline.py -t http://localhost:8080 -r zap-report.html || true
 
->>>>>>> 0d80b7c65079138789329f6bccef973517669ab8
 artifacts:
   files:
     - trufflehog.json
     - zap_report.html
+    - snyk.sarif
