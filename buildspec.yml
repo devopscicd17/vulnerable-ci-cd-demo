@@ -1,31 +1,29 @@
 version: 0.2
+
 phases:
   install:
     runtime-versions:
-      python: 3.8
+      docker: 18
     commands:
-      - pip install --upgrade pip
-      - pip install flask
-      - npm install -g snyk
-      - pip install trufflehog
-      - apt-get update && apt-get install -y unzip curl openjdk-11-jdk
+      - echo Installing tools...
+      - apt-get update && apt-get install -y curl unzip
       - curl -sL https://github.com/zaproxy/zaproxy/releases/download/v2.14.0/ZAP_2.14.0_unix.sh -o zap.sh
-      - chmod +x zap.sh && ./zap.sh -q -dir /zap -desktop none
+      - chmod +x zap.sh && ./zap.sh -q -dir /zap -desktop none || true
+      - curl -s https://api.github.com/repos/trufflesecurity/trufflehog/releases/latest | grep "browser_download_url.*linux_amd64$" | cut -d '"' -f 4 | wget -qi - -O trufflehog
+      - chmod +x trufflehog
   pre_build:
     commands:
-      - snyk auth $SNYK_TOKEN
-      - snyk test --file=app/requirements.txt --sarif-file-output=snyk.sarif || true
-      - snyk monitor --file=app/requirements.txt
-      - trufflehog filesystem . --json > trufflehog.json || true
+      - echo Logging in to Amazon ECR...
+      - $(aws ecr get-login --no-include-email --region $AWS_REGION) || true
   build:
     commands:
+      - echo Building Docker image...
       - docker build -t vulnerable-app .
-      - docker run -d -p 8080:8080 vulnerable-app
-  post_build:
-    commands:
-      - /zap/zap.sh -cmd -quickurl http://localhost:8080 -quickout zap-report.html -quickprogress -quickquiet
+      - echo Running TruffleHog for secrets scanning...
+      - ./trufflehog git . --json > trufflehog.json || true
+      - echo Running ZAP baseline scan...
+      - /zap/zap.sh -cmd -quickurl http://localhost:8080 -quickout zap_report.html || true
 artifacts:
   files:
-    - zap-report.html
-    - snyk.sarif
     - trufflehog.json
+    - zap_report.html

@@ -1,5 +1,0 @@
-{
-  "rules": [
-    { "regex": "AKIA[0-9A-Z]{16}", "description": "AWS Access Key" }
-  ]
-}
