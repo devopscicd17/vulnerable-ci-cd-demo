@@ -1,0 +1,31 @@
+version: 0.2
+phases:
+  install:
+    runtime-versions:
+      python: 3.8
+    commands:
+      - pip install --upgrade pip
+      - pip install flask
+      - npm install -g snyk
+      - pip install trufflehog
+      - apt-get update && apt-get install -y unzip curl openjdk-11-jdk
+      - curl -sL https://github.com/zaproxy/zaproxy/releases/download/v2.14.0/ZAP_2.14.0_unix.sh -o zap.sh
+      - chmod +x zap.sh && ./zap.sh -q -dir /zap -desktop none
+  pre_build:
+    commands:
+      - snyk auth $SNYK_TOKEN
+      - snyk test --file=app/requirements.txt --sarif-file-output=snyk.sarif || true
+      - snyk monitor --file=app/requirements.txt
+      - trufflehog filesystem . --json > trufflehog.json || true
+  build:
+    commands:
+      - docker build -t vulnerable-app .
+      - docker run -d -p 8080:8080 vulnerable-app
+  post_build:
+    commands:
+      - /zap/zap.sh -cmd -quickurl http://localhost:8080 -quickout zap-report.html -quickprogress -quickquiet
+artifacts:
+  files:
+    - zap-report.html
+    - snyk.sarif
+    - trufflehog.json
