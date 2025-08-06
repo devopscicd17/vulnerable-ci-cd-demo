@@ -1,4 +1,5 @@
 version: 0.2
+
 phases:
   install:
     runtime-versions:
@@ -8,22 +9,26 @@ phases:
       - pip install flask
       - npm install -g snyk
       - pip install trufflehog
-      - apt-get update && apt-get install -y unzip curl openjdk-11-jdk
-      - curl -sL https://github.com/zaproxy/zaproxy/releases/download/v2.14.0/ZAP_2.14.0_unix.sh -o zap.sh
-      - chmod +x zap.sh && ./zap.sh -q -dir /zap -desktop none
+      - echo "Tools installed"
+
   pre_build:
     commands:
       - snyk auth $SNYK_TOKEN
       - snyk test --file=app/requirements.txt --sarif-file-output=snyk.sarif || true
       - snyk monitor --file=app/requirements.txt
       - trufflehog filesystem . --json > trufflehog.json || true
+
   build:
     commands:
       - docker build -t vulnerable-app .
-      - docker run -d -p 8080:8080 vulnerable-app
+      - docker run -d -p 8080:8080 --name vuln-demo vulnerable-app
+      - sleep 10  # give the container time to start
+
   post_build:
     commands:
-      - /zap/zap.sh -cmd -quickurl http://localhost:8080 -quickout zap-report.html -quickprogress -quickquiet
+      - echo "Running OWASP ZAP in Docker..."
+      - docker run --network="host" -v $(pwd):/zap/wrk/:rw ghcr.io/zaproxy/zap-stable zap-baseline.py -t http://localhost:8080 -r zap-report.html || true
+
 artifacts:
   files:
     - zap-report.html
