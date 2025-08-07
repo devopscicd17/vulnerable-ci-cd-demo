@@ -3,42 +3,41 @@ version: 0.2
 phases:
   install:
     runtime-versions:
-      docker: 18
+      nodejs: 18
     commands:
-      - echo Installing tools...
-      - apt-get update && apt-get install -y curl unzip
-      - curl -sL https://github.com/zaproxy/zaproxy/releases/download/v2.14.0/ZAP_2.14.0_unix.sh -o zap.sh
-      - chmod +x zap.sh && ./zap.sh -q -dir /zap -desktop none || true
-      - curl -s https://api.github.com/repos/trufflesecurity/trufflehog/releases/latest | grep "browser_download_url.*linux_amd64$" | cut -d '"' -f 4 | wget -qi - -O trufflehog
-      - chmod +x trufflehog
-      - pip install --upgrade pip
-      - pip install flask
+      - echo Installing dependencies...
       - npm install -g snyk
-      - echo Tools installed
+      - curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh
+      - pip install truffleHog
+      - wget https://github.com/zaproxy/zaproxy/releases/download/v2.14.0/ZAP_2.14.0_Linux.tar.gz
+      - tar -xvzf ZAP_2.14.0_Linux.tar.gz
+      - export PATH=$PATH:$(pwd)/ZAP_2.14.0
 
   pre_build:
     commands:
       - echo Logging in to Amazon ECR...
-      - $(aws ecr get-login --no-include-email --region $AWS_REGION) || true
-      - snyk auth $SNYK_TOKEN
-      - snyk test --file=app/requirements.txt --sarif-file-output=snyk.sarif || true
-      - snyk monitor --file=app/requirements.txt
-      - ./trufflehog git . --json > trufflehog.json || true
+      - $(aws ecr get-login --no-include-email --region $AWS_REGION)
+      - IMAGE_TAG=$(echo $CODEBUILD_RESOLVED_SOURCE_VERSION | cut -c 1-7)
+      - REPO_URI=$ECR_REPOSITORY_URI
 
   build:
     commands:
-      - echo Building Docker image...
-      - docker build -t vulnerable-app .
-      - docker run -d -p 8080:8080 --name vuln-demo vulnerable-app
-      - sleep 10  # Give the container time to start
+      - echo Building the Docker image...
+      - docker build -t $REPO_URI:$IMAGE_TAG .
+      - echo Scanning with Trivy...
+      - ./trivy image --exit-code 1 --severity HIGH $REPO_URI:$IMAGE_TAG
+      - echo Scanning with Snyk...
+      - snyk test --docker $REPO_URI:$IMAGE_TAG || true
+      - echo Scanning with TruffleHog...
+      - trufflehog filesystem . || true
+      - echo Starting ZAP scan...
+      - ./ZAP_2.14.0/zap.sh -cmd -quickurl http://yourapp-url.com -quickout zap_report.html || true
 
   post_build:
     commands:
-      - echo Running ZAP baseline scan...
-      - docker run --network="host" -v $(pwd):/zap/wrk/:rw ghcr.io/zaproxy/zap-stable zap-baseline.py -t http://localhost:8080 -r zap-report.html || true
+      - echo Build completed on `date`
+      - docker push $REPO_URI:$IMAGE_TAG
 
 artifacts:
   files:
-    - trufflehog.json
     - zap_report.html
-    - snyk.sarif
